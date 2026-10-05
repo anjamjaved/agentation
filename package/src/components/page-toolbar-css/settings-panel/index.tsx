@@ -1,6 +1,6 @@
 import { memo, useLayoutEffect, useRef } from "react";
 import { usePanelPresence } from "../../../hooks/use-panel-presence";
-import { COLOR_OPTIONS, ToolbarSettings } from "..";
+import { COLOR_OPTIONS, ToolbarSettings, type OutputDetailLevel } from "..";
 import { OUTPUT_DETAIL_OPTIONS } from "../../../utils/generate-output";
 import { HelpTooltip } from "../../help-tooltip";
 import { IconChevronLeft, IconMoon, IconSun } from "../../icons";
@@ -12,6 +12,7 @@ type ConnectionStatus = "disconnected" | "connecting" | "connected";
 
 export type SettingsPanelProps = {
   settings: ToolbarSettings;
+  outputDetail?: OutputDetailLevel;
   onSettingsChange: (patch: Partial<ToolbarSettings>) => void;
 
   isDarkMode: boolean;
@@ -36,6 +37,7 @@ export type SettingsPanelProps = {
 
 export const SettingsPanel = memo(function SettingsPanel({
   settings,
+  outputDetail,
   onSettingsChange,
   isDarkMode,
   onToggleTheme,
@@ -116,6 +118,8 @@ export const SettingsPanel = memo(function SettingsPanel({
               </div>
               <button
                 className={styles.cycleButton}
+                disabled={outputDetail !== undefined}
+                title={outputDetail !== undefined ? "Output detail is set by the application" : undefined}
                 onClick={() => {
                   const currentIndex = OUTPUT_DETAIL_OPTIONS.findIndex(
                     (opt) => opt.value === settings.outputDetail,

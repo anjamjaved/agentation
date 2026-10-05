@@ -356,6 +356,8 @@ export type PageFeedbackToolbarCSSProps = {
   enableKeyboardShortcuts?: boolean;
   /** Stable data attributes used in element paths. Replaces the default identifying list. */
   identifyingAttributes?: readonly string[];
+  /** Force the output detail level and disable its settings control. Omit to allow user configuration. */
+  outputDetail?: OutputDetailLevel;
   /** Format the Copy action. Send to Agent always receives structured markdown. */
   copyFormat?: CopyFormat;
   /** Show Open in editor when source metadata exists. The host chooses the editor integration. */
@@ -393,6 +395,7 @@ function PageFeedbackToolbarForRoute({
   appName,
   enableKeyboardShortcuts = true,
   identifyingAttributes = DEFAULT_IDENTIFYING_ATTRIBUTES,
+  outputDetail,
   copyFormat = "markdown",
   onOpenSource,
   portalContainer,
@@ -728,7 +731,7 @@ function PageFeedbackToolbarForRoute({
     };
   }, []);
 
-  const [settings, setSettings] = useState<ToolbarSettings>(() => {
+  const [userSettings, setSettings] = useState<ToolbarSettings>(() => {
     try {
     const saved = JSON.parse(localStorage.getItem("feedback-toolbar-settings") ?? "");
       return {
@@ -742,6 +745,10 @@ function PageFeedbackToolbarForRoute({
       return DEFAULT_SETTINGS;
     }
   });
+  const settings = useMemo(() => ({
+    ...userSettings,
+    outputDetail: outputDetail ?? userSettings.outputDetail,
+  }), [userSettings, outputDetail]);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [showEntranceAnimation, setShowEntranceAnimation] = useState(false);
 
@@ -898,10 +905,10 @@ function PageFeedbackToolbarForRoute({
     if (mounted) {
       localStorage.setItem(
         "feedback-toolbar-settings",
-        JSON.stringify(settings),
+        JSON.stringify(userSettings),
       );
     }
-  }, [settings, mounted]);
+  }, [userSettings, mounted]);
 
   // Save theme preference
   useEffect(() => {
@@ -4117,6 +4124,7 @@ function PageFeedbackToolbarForRoute({
 
               <SettingsPanel
                 settings={settings}
+                outputDetail={outputDetail}
                 onSettingsChange={updateSettings}
                 isDarkMode={isDarkMode}
                 onToggleTheme={toggleTheme}

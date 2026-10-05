@@ -81,6 +81,7 @@ browser: create a test annotation and ask your agent to read
 | `enableKeyboardShortcuts` | `boolean` | `true` | Enable global shortcuts; popup Enter/Escape and button activation remain available |
 | `identifyingAttributes` | `readonly string[]` | See below | Attributes captured from the selected element for identification |
 | `copyFormat` | `"markdown"`, `"source"`, `"classes"`, or attribute option | `"markdown"` | Choose the Copy output; Send still receives structured markdown and annotations |
+| `outputDetail` | `"compact" \| "standard" \| "detailed" \| "forensic"` | User setting (`"standard"` initially) | Force output detail and disable its settings control |
 | `onOpenSource` | `(sourceFile: string) => void` | - | Show Open in editor when source metadata is available |
 | `portalContainer` | `HTMLElement \| ShadowRoot \| null` | `document.body` | Place Agentation inside a host modal or popover's focus boundary |
 
