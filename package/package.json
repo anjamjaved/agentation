@@ -29,6 +29,7 @@
     "dev": "pnpm build && pnpm watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "playground": "node playground/serve.mjs",
     "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {

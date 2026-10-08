@@ -28,6 +28,13 @@ export type Annotation = {
     x: number; y: number; fixed: boolean;
     boundingBox: { x: number; y: number; width: number; height: number };
   };
+  // Innermost scrollable element holding the target, so markers follow its scroll.
+  // x/y: where its scrolled content started, in the same space as x (px) and y.
+  scrollContainer?: {
+    selector: string[]; // one selector per (shadow) root, outermost first
+    x: number;
+    y: number;
+  };
   drawingIndex?: number; // Index of linked draw stroke (if any)
   elementBoundingBoxes?: Array<{
     x: number;

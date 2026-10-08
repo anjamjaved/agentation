@@ -1,7 +1,8 @@
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { Annotation } from "../../../types";
-import { IconEdit, IconPlus, IconXmark } from "../../icons";
+import { IconChevronRight, IconEdit, IconPlus, IconXmark } from "../../icons";
 import { useExitCompletion } from "../../../hooks/use-exit-completion";
+import type { PinSide } from "../../../utils/scroll-containers";
 import styles from "./styles.module.scss";
 
 type MarkerClickBehavior = "edit" | "delete";
@@ -13,6 +14,8 @@ type MarkerClickBehavior = "edit" | "delete";
 type AnnotationMarkerProps = {
   annotation: Annotation;
   pending?: boolean;
+  /** Held at this edge of a scroll container because its target is out of view. */
+  pinned?: PinSide;
   globalIndex: number;
   /** Display index within this layer (for staggered animation delays) */
   layerIndex: number;
@@ -37,6 +40,7 @@ type AnnotationMarkerProps = {
 export const AnnotationMarker = memo(function AnnotationMarker({
   annotation,
   pending = false,
+  pinned,
   globalIndex,
   layerIndex,
   layerSize,
@@ -67,7 +71,7 @@ export const AnnotationMarker = memo(function AnnotationMarker({
   const markerRef = useRef<HTMLButtonElement>(null);
   const restingContent = useRef({ action: false, delete: false });
   const action = isHovered && !isEditingAny;
-  const deleteHover = action && markerClickBehavior === "delete";
+  const deleteHover = action && markerClickBehavior === "delete" && !pinned;
   useLayoutEffect(() => {
     if (!isRemoving) restingContent.current = { action, delete: deleteHover };
   }, [isRemoving, action, deleteHover]);
@@ -103,11 +107,12 @@ export const AnnotationMarker = memo(function AnnotationMarker({
     <button
       ref={markerRef}
       type="button"
-      aria-label={pending ? "Pending annotation" : `${markerClickBehavior === "delete" ? "Delete" : "Edit"} annotation ${globalIndex + 1}: ${annotation.element}`}
+      aria-label={pending ? "Pending annotation" : `${pinned ? "Scroll to" : markerClickBehavior === "delete" ? "Delete" : "Edit"} annotation ${globalIndex + 1}: ${annotation.element}`}
       disabled={pending || isExiting || isRemoving || isClearing}
       tabIndex={pending || isEditingAny ? -1 : 0}
-      className={`${styles.marker} ${pending ? styles.pending : ""} ${isMulti ? styles.multiSelect : ""} ${animClass} ${!pending && showAction ? styles.actionVisible : ""} ${showDeleteHover ? styles.hovered : ""} ${isHovered && !isEditingAny && !isRemoving ? styles.previewVisible : ""}`}
+      className={`${styles.marker} ${pending ? styles.pending : ""} ${isMulti ? styles.multiSelect : ""} ${animClass} ${!pending && showAction ? styles.actionVisible : ""} ${showDeleteHover ? styles.hovered : ""} ${isHovered && !isEditingAny && !isRemoving ? styles.previewVisible : ""} ${pinned ? styles.pinned : ""}`}
       data-annotation-marker={pending ? undefined : ""}
+      data-pinned={pinned}
       data-annotation-pending={pending ? "" : undefined}
       style={{
         left: `${annotation.x}%`,
@@ -160,7 +165,9 @@ export const AnnotationMarker = memo(function AnnotationMarker({
         <span className={styles.numberGlyph}>{globalIndex + 1}</span>
       </span>
       <span className={styles.actionGlyph} aria-hidden="true">
-        {markerClickBehavior === "delete" ? (
+        {pinned ? (
+          <IconChevronRight size={16} />
+        ) : markerClickBehavior === "delete" ? (
           <IconXmark size={isMulti ? 18 : 16} />
         ) : (
           <IconEdit size={16} />

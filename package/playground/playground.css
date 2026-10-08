@@ -1,0 +1,139 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #f6f6f4;
+  --surface: #fff;
+  --border: #e2e2de;
+  --text: #1b1b1a;
+  --muted: #6b6b66;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+}
+
+/* App-shell layout: the document never scrolls, <main> does. */
+.shell,
+.shell body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.shell main {
+  height: 100vh;
+  overflow: auto;
+}
+
+main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 32px 16px 400px 16px;
+}
+
+.shell main {
+  max-width: none;
+  padding-left: max(16px, calc((100vw - 880px) / 2));
+  padding-right: max(16px, calc((100vw - 880px) / 2));
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+nav {
+  display: flex;
+  gap: 12px;
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+
+section {
+  margin: 0 0 32px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+.scroller {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: auto;
+}
+
+.v-scroll {
+  height: 260px;
+}
+
+.row {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.h-scroll {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+}
+
+.h-scroll .card {
+  flex: 0 0 220px;
+  height: 120px;
+}
+
+.nested-outer {
+  height: 320px;
+  padding: 12px;
+}
+
+.nested-inner {
+  height: 180px;
+  margin: 160px 0 400px;
+  border-style: dashed;
+}
+
+.fixed-panel {
+  position: fixed;
+  right: 16px;
+  top: 80px;
+  width: 200px;
+  height: 260px;
+  z-index: 10;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.spacer {
+  height: 600px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+}

@@ -3,6 +3,7 @@
 import { useLatestAction } from "../../hooks/use-latest-action";
 import { mergeSessionFeedback } from "../../utils/merge-session-feedback";
 import { createPageEvents, createFrameProjector, viewportRect, parentFrame, captureFrameContext } from "../../utils/frame-dom";
+import { captureScrollContainer, createScrollProjector, revealInScrollContainer } from "../../utils/scroll-containers";
 import { deepElementFromPoint, pierceElementFromPoint, annotationElementFromPoint } from "../../utils/hit-testing";
 
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from "react";
@@ -549,6 +550,7 @@ function PageFeedbackToolbarForRoute({
     sourceFile?: string;
     attributes?: Record<string, string>;
     frame?: Annotation["frame"];
+    scrollContainer?: Annotation["scrollContainer"];
     elementBoundingBoxes?: Array<{
       x: number;
       y: number;
@@ -792,6 +794,8 @@ function PageFeedbackToolbarForRoute({
   // For animations - track which markers have animated in and which are exiting
   const animatedMarkers = useRef(new Set<string>());
   const markerKeys = useRef(new Map<string, string>());
+  // Markers held at the edge of a scroll container their target left.
+  const pinnedMarkerIds = useRef(new Set<string>());
   const handleMarkerEntered = useCallback((id: string) => {
     animatedMarkers.current.add(id);
     if (recentlyAddedIdRef.current === id) recentlyAddedIdRef.current = null;
@@ -1672,6 +1676,7 @@ function PageFeedbackToolbarForRoute({
           height: rect.height,
         },
         isFixed,
+        scrollContainer: captureScrollContainer([firstEl], isFixed),
         fullPath: getFullElementPath(firstEl),
         accessibility: getAccessibilityInfo(firstEl),
         computedStyles: getForensicComputedStyles(firstEl),
@@ -1732,6 +1737,7 @@ function PageFeedbackToolbarForRoute({
         },
         isMultiSelect: true,
         isFixed: lastIsFixed,
+        scrollContainer: captureScrollContainer(selection.map((item) => item.element), lastIsFixed),
         elementBoundingBoxes,
         multiSelectElements: selection.map((item) => item.element),
         targetElement: lastEl, // Anchor marker/popup to last clicked element
@@ -2083,6 +2089,7 @@ function PageFeedbackToolbarForRoute({
         sourceFile: detectSourceFile(elementUnder),
         attributes: captureElementAttributes(elementUnder, attributeNames),
         frame: captureFrameContext(elementUnder, e.clientX, e.clientY),
+        scrollContainer: captureScrollContainer([elementUnder], isFixed),
         targetElement: elementUnder, // Store for live position queries
       });
       setHoverInfo(null);
@@ -2539,6 +2546,7 @@ function PageFeedbackToolbarForRoute({
                 height: bounds.bottom - bounds.top,
               },
               isMultiSelect: true,
+              scrollContainer: captureScrollContainer(finalElements.map(({ element }) => element), false),
               // Forensic data from first element
               fullPath: getFullElementPath(firstElement),
               accessibility: getAccessibilityInfo(firstElement),
@@ -2664,6 +2672,7 @@ function PageFeedbackToolbarForRoute({
         sourceFile: pendingAnnotation.sourceFile,
         attributes: pendingAnnotation.attributes,
         frame: pendingAnnotation.frame,
+        scrollContainer: pendingAnnotation.scrollContainer,
         elementBoundingBoxes: pendingAnnotation.elementBoundingBoxes,
         // Protocol fields for server sync
         ...(endpoint && currentSessionId
@@ -2795,7 +2804,11 @@ function PageFeedbackToolbarForRoute({
     setHoveredMarkerId(annotation.id);
 
     // Find elements at the annotation's position(s) for live tracking
-    if (annotation.elementBoundingBoxes?.length) {
+    if (pinnedMarkerIds.current.has(annotation.id)) {
+      // Pinned: the target is scrolled out of view, nothing to outline.
+      setHoveredTargetElement(null);
+      setHoveredTargetElements([]);
+    } else if (annotation.elementBoundingBoxes?.length) {
       // Modifier-click: find element at each bounding box center
       const elements: HTMLElement[] = [];
       for (const bb of annotation.elementBoundingBoxes) {
@@ -3614,22 +3627,32 @@ function PageFeedbackToolbarForRoute({
   const hasAnnotations = annotations.length > 0;
 
   // Saved order owns numbering and the badge. Scrolling only changes visibility.
-  const projectFrameAnnotation = createFrameProjector();
+  const projectFrame = createFrameProjector();
+  const projectScroll = createScrollProjector();
+  // Display positions only: a pinned copy is clamped to its container's edge.
+  const placeAnnotation = <T extends Parameters<typeof projectFrame>[0] & Parameters<typeof projectScroll>[0]>(annotation: T) => {
+    const placed = projectScroll(annotation);
+    const projected = placed && projectFrame(placed.annotation);
+    return projected ? { annotation: projected, pinned: placed.pinned } : null;
+  };
+  const projectAnnotation = <T extends Parameters<typeof placeAnnotation>[0]>(annotation: T) =>
+    placeAnnotation(annotation)?.annotation ?? null;
   const markerAnnotations = annotations.filter(
     (a) => a.kind !== "placement" && a.kind !== "rearrange",
   );
   const visibleAnnotations = markerAnnotations.flatMap((annotation, index) => {
-    const projected = projectFrameAnnotation(annotation);
-    return projected
-      ? [{ annotation: projected, index }]
-      : [];
+    const placed = placeAnnotation(annotation);
+    return placed ? [{ ...placed, index }] : [];
   });
   const pendingMarker = pendingAnnotation && !pendingAnnotation.isSubmitted
-    ? projectFrameAnnotation({ ...pendingAnnotation, comment: "", timestamp: 0 }) : null;
+    ? placeAnnotation({ ...pendingAnnotation, comment: "", timestamp: 0 }) : null;
   const renderedMarkers = [
     ...(markersVisible ? visibleAnnotations.map(item => ({ ...item, pending: false })) : []),
-    ...(pendingMarker ? [{ annotation: pendingMarker, index: markerAnnotations.length, pending: true }] : []),
+    ...(pendingMarker ? [{ ...pendingMarker, index: markerAnnotations.length, pending: true }] : []),
   ];
+  pinnedMarkerIds.current = new Set(
+    renderedMarkers.filter(({ pinned, pending }) => pinned && !pending).map(({ annotation }) => annotation.id),
+  );
 
   // Hidden markers have no animation to wait for (including offscreen frames).
   useEffect(() => {
@@ -3658,7 +3681,20 @@ function PageFeedbackToolbarForRoute({
     // Blur from the previous focus target must not clear a newer pointer hover.
     if (hoveredMarkerId === id) handleMarkerHover(null);
   }, [hoveredMarkerId, handleMarkerHover]);
+  // A pinned marker's target is out of view: bring it back instead of acting on it.
+  const revealPinnedMarker = useCallback((id: string) => {
+    if (!pinnedMarkerIds.current.has(id)) return false;
+    const saved = annotations.find((a) => a.id === id);
+    if (saved) revealInScrollContainer(saved);
+    return true;
+  }, [annotations]);
+
+  const handleMarkerContextMenu = useCallback((annotation: Annotation, trigger: HTMLButtonElement) => {
+    if (!revealPinnedMarker(annotation.id)) startEditAnnotation(annotation, trigger);
+  }, [revealPinnedMarker, startEditAnnotation]);
+
   const handleMarkerClick = useCallback((annotation: Annotation, trigger: HTMLButtonElement) => {
+    if (revealPinnedMarker(annotation.id)) return;
     if (editingAnnotation && !editExiting) {
       editPopupRef.current?.shake();
       return;
@@ -3666,7 +3702,7 @@ function PageFeedbackToolbarForRoute({
     if (pendingExiting) finishPendingExit();
     if (settings.markerClickBehavior === "delete") deleteAnnotation(annotation.id);
     else startEditAnnotation(annotation, trigger);
-  }, [settings.markerClickBehavior, deleteAnnotation, startEditAnnotation, pendingExiting, finishPendingExit, editingAnnotation, editExiting]);
+  }, [settings.markerClickBehavior, deleteAnnotation, startEditAnnotation, pendingExiting, finishPendingExit, editingAnnotation, editExiting, revealPinnedMarker]);
 
   const cardAnnotation = editingAnnotation ?? (shouldShowMarkers && !pendingAnnotation && !isClearing
     ? annotations.find(a => a.id === hoveredMarkerId && !exitingMarkers.has(a.id)) : null);
@@ -4319,11 +4355,12 @@ function PageFeedbackToolbarForRoute({
           <div className={styles.markersLayer} data-feedback-toolbar>
             {renderedMarkers
                 .filter(({ annotation }) => !annotation.isFixed)
-                .map(({ annotation, index, pending }, layerIndex, arr) => (
+                .map(({ annotation, index, pending, pinned }, layerIndex, arr) => (
                   <AnnotationMarker
                     key={markerKeys.current.get(annotation.id) ?? annotation.id}
                     annotation={annotation}
                     pending={pending}
+                    pinned={pinned}
                     globalIndex={index}
                     layerIndex={layerIndex}
                     layerSize={arr.length}
@@ -4341,7 +4378,7 @@ function PageFeedbackToolbarForRoute({
                     onHoverEnter={handleMarkerEnter}
                     onHoverLeave={handleMarkerLeave}
                     onClick={handleMarkerClick}
-                    onContextMenu={startEditAnnotation}
+                    onContextMenu={handleMarkerContextMenu}
                   />
                 ))}
 
@@ -4351,11 +4388,12 @@ function PageFeedbackToolbarForRoute({
           <div className={styles.fixedMarkersLayer} data-feedback-toolbar>
             {renderedMarkers
                 .filter(({ annotation }) => annotation.isFixed)
-                .map(({ annotation, index, pending }, layerIndex, arr) => (
+                .map(({ annotation, index, pending, pinned }, layerIndex, arr) => (
                   <AnnotationMarker
                     key={markerKeys.current.get(annotation.id) ?? annotation.id}
                     annotation={annotation}
                     pending={pending}
+                    pinned={pinned}
                     globalIndex={index}
                     layerIndex={layerIndex}
                     layerSize={arr.length}
@@ -4373,7 +4411,7 @@ function PageFeedbackToolbarForRoute({
                     onHoverEnter={handleMarkerEnter}
                     onHoverLeave={handleMarkerLeave}
                     onClick={handleMarkerClick}
-                    onContextMenu={startEditAnnotation}
+                    onContextMenu={handleMarkerContextMenu}
                   />
                 ))}
 
@@ -4458,9 +4496,11 @@ function PageFeedbackToolbarForRoute({
               {hoveredMarkerId &&
                 !pendingAnnotation &&
                 (() => {
-                  const hoveredAnnotation = annotations.find(
+                  const hovered = annotations.find(
                     (a) => a.id === hoveredMarkerId,
                   );
+                  const hoveredAnnotation = hovered && !pinnedMarkerIds.current.has(hovered.id)
+                    ? projectAnnotation(hovered) : null;
                   if (!hoveredAnnotation?.boundingBox) return null;
 
                   // Render individual element boxes if available (modifier-click multi-select)
@@ -4604,7 +4644,7 @@ function PageFeedbackToolbarForRoute({
 
                   {(() => {
                     // Use stored coordinates - they match what will be saved
-                    const positioned = projectFrameAnnotation(pendingAnnotation) ?? pendingAnnotation;
+                    const positioned = projectAnnotation(pendingAnnotation) ?? pendingAnnotation;
                     const markerX = positioned.x;
                     const markerY = positioned.isFixed
                       ? positioned.y
@@ -4766,7 +4806,7 @@ function PageFeedbackToolbarForRoute({
           )}
           <AnnotationCard
             ref={editPopupRef}
-            annotation={cardAnnotation ? projectFrameAnnotation(cardAnnotation) ?? editingAnnotation : null}
+            annotation={cardAnnotation ? projectAnnotation(cardAnnotation) ?? editingAnnotation : null}
             editing={!!editingAnnotation}
             exiting={editExiting}
             restorePreview={restoreEditPreview}

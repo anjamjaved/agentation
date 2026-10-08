@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { PageFeedbackToolbarCSS } from "./index";
+import { getStorageKey } from "../../utils/storage";
 import { StrictMode } from "react";
 
 const originalPoint = document.elementFromPoint;
@@ -55,6 +56,49 @@ describe('combined selection', () => {
     vi.stubGlobal('scrollY', 400);
     fireEvent.scroll(document);
     expect(Number.parseFloat(marker.style.top) - window.scrollY).toBe(160);
+  });
+
+  it('keeps a marker on a target inside a scrolling container and pins it to the edge once scrolled out', () => {
+    render(<><div data-testid="list" style={{ overflowY: 'auto' }}><p>Row</p></div><PageFeedbackToolbarCSS /></>);
+    const list = screen.getByTestId('list');
+    const row = screen.getByText('Row');
+    rect(list, 0, 100, 400, 200);
+    Object.defineProperties(list, { clientWidth: { value: 400 }, clientHeight: { value: 200 }, scrollHeight: { value: 800 } });
+    rect(row, 0, 150, 400, 30);
+    point(row);
+    activate();
+    fireEvent.click(row, { clientX: 20, clientY: 160 });
+    const marker = () => root().querySelector<HTMLElement>('[data-annotation-pending]');
+    expect(Number.parseFloat(marker()!.style.top)).toBe(160);
+    list.scrollTop = 40;
+    fireEvent.scroll(list);
+    expect(Number.parseFloat(marker()!.style.top)).toBe(120);
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+    expect(marker()!.dataset.pinned).toBe('top');
+    expect(Number.parseFloat(marker()!.style.top)).toBe(113);
+  });
+
+  it('scrolls a pinned marker\'s target back into view instead of editing it', () => {
+    localStorage.setItem(getStorageKey(window.location.pathname), JSON.stringify([{
+      id: 'a', x: 5, y: 150, comment: 'Note', element: 'Row', elementPath: 'p', timestamp: Date.now(),
+      boundingBox: { x: 0, y: 140, width: 400, height: 30 },
+      scrollContainer: { selector: ['#list'], x: 0, y: 100 },
+    }]));
+    render(<><div id="list" style={{ overflowY: 'auto' }}><p>Row</p></div><PageFeedbackToolbarCSS /></>);
+    const list = document.getElementById('list')!;
+    rect(list, 0, 100, 400, 200);
+    Object.defineProperties(list, { clientWidth: { value: 400 }, clientHeight: { value: 200 }, scrollHeight: { value: 800 } });
+    list.scrollBy = vi.fn();
+    activate();
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+    const marker = root().querySelector<HTMLElement>('[data-annotation-marker]')!;
+    expect(marker.dataset.pinned).toBe('top');
+    expect(marker.getAttribute('aria-label')).toBe('Scroll to annotation 1: Row');
+    fireEvent.click(marker);
+    expect(list.scrollBy).toHaveBeenCalledWith({ left: 0, top: -150, behavior: 'smooth' });
+    expect(root().querySelector('[data-state="edit"]')).toBeNull();
   });
 
   it('keeps measured hover labels inside both viewport axes', () => {

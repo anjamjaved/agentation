@@ -129,6 +129,23 @@
   &.hovered {
     background-color: var(--agentation-color-red);
   }
+
+  // Glide onto the edge instead of snapping to it.
+  &.pinned:not(.enter):not(.exit):not(.clearing):not(.confirm) {
+    transition:
+      background-color 0.15s ease,
+      transform 0.1s ease,
+      z-index 0s 0.1s,
+      left 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+      top 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+// Held at a scroll container's edge: the hover chevron points at the target.
+.pinned {
+  &[data-pinned="top"] .actionGlyph svg { transform: rotate(-90deg); }
+  &[data-pinned="bottom"] .actionGlyph svg { transform: rotate(90deg); }
+  &[data-pinned="left"] .actionGlyph svg { transform: rotate(180deg); }
 }
 
 .renumber {
@@ -185,6 +202,7 @@
 @media (prefers-reduced-motion: reduce) {
   .marker {
     &.enter, &.exit, &.clearing, &.confirm { animation-duration: 1ms; animation-delay: 0ms !important; }
+    &.pinned { transition-duration: 1ms !important; }
   }
   .numberGlyph, .actionGlyph, .plus { transition: opacity 100ms ease-out; transform: none; filter: none; }
   .pending .numberGlyph, .pending .plus,

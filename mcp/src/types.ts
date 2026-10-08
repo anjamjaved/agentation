@@ -28,6 +28,7 @@ export type Annotation = {
     x: number; y: number; fixed: boolean;
     boundingBox: { x: number; y: number; width: number; height: number };
   };
+  scrollContainer?: { selector: string[]; x: number; y: number };
 
   // Annotation kind (defaults to "feedback" when undefined — backward compat)
   kind?: "feedback" | "placement" | "rearrange";
