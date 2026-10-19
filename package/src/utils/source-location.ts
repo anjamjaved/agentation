@@ -77,6 +77,8 @@ interface ReactFiber {
   };
   // Owner info (React 19 may use this differently)
   _debugOwner?: ReactFiber;
+  // React 19: the stack captured where this fiber's JSX element was created
+  _debugStack?: { stack?: string };
   // Component type
   type?: {
     name?: string;
@@ -566,6 +568,9 @@ function cleanSourcePath(rawPath: string): string {
   // 6. http(s)://host:port/
   path = path.replace(/^https?:\/\/[^/]+\//, "");
 
+  // 6b. Vite serves files outside its root as /@fs/<absolute path>
+  path = path.replace(/^@fs\//, "/");
+
   // 7. file:///
   path = path.replace(/^file:\/\/\//, "/");
 
@@ -663,6 +668,206 @@ function probeSourceWalk(
   return null;
 }
 
+// =============================================================================
+// React 19: element creation stacks
+// =============================================================================
+//
+// React 19 removed `_debugSource`, but in development every fiber keeps
+// `_debugStack`: an Error captured where its JSX element was created. Its
+// frames point at the dev server's transformed modules, so on their own they
+// give generated line numbers. Vite serves each module with an inline source
+// map, which maps the creation site back to the original line. Unlike probing
+// a component's first hook, this resolves the selected element itself, and
+// walking `_debugOwner` past library code lands on the line that rendered it.
+
+const BASE64_VALUES: Record<string, number> = {};
+"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  .split("")
+  .forEach((char, index) => {
+    BASE64_VALUES[char] = index;
+  });
+
+/** One decoded mapping: [generatedColumn, sourceIndex, sourceLine, sourceColumn], all 0-indexed. */
+type MappingSegment = [number, number, number, number];
+
+/**
+ * Decode a source map's VLQ `mappings` into segments per generated line.
+ * Segments without a source position are dropped.
+ */
+function decodeSourceMapMappings(mappings: string): MappingSegment[][] {
+  const lines: MappingSegment[][] = [];
+  let sourceIndex = 0;
+  let sourceLine = 0;
+  let sourceColumn = 0;
+
+  for (const lineText of mappings.split(";")) {
+    const segments: MappingSegment[] = [];
+    let generatedColumn = 0;
+
+    for (const segmentText of lineText ? lineText.split(",") : []) {
+      const values: number[] = [];
+      let value = 0;
+      let shift = 0;
+      for (const char of segmentText) {
+        const digit = BASE64_VALUES[char];
+        if (digit === undefined) break;
+        value += (digit & 31) << shift;
+        if (digit & 32) {
+          shift += 5;
+        } else {
+          values.push(value & 1 ? -(value >>> 1) : value >>> 1);
+          value = 0;
+          shift = 0;
+        }
+      }
+      if (values.length === 0) continue;
+
+      generatedColumn += values[0];
+      if (values.length >= 4) {
+        sourceIndex += values[1];
+        sourceLine += values[2];
+        sourceColumn += values[3];
+        segments.push([generatedColumn, sourceIndex, sourceLine, sourceColumn]);
+      }
+    }
+
+    lines.push(segments);
+  }
+
+  return lines;
+}
+
+interface LoadedSourceMap {
+  sources: string[];
+  lines: MappingSegment[][];
+}
+
+const sourceMapCache = new Map<string, LoadedSourceMap | null>();
+
+/**
+ * Synchronous because annotations are built synchronously. It runs only when
+ * an element is picked, in development, against modules the page has already
+ * loaded: one blocking request per module (a 304 revalidation on Vite, which
+ * serves modules `no-cache`), after which the decoded map stays in memory.
+ */
+function fetchTextSync(url: string): string | null {
+  const request = new XMLHttpRequest();
+  request.open("GET", url, false);
+  request.send();
+  return request.status >= 200 && request.status < 300
+    ? request.responseText
+    : null;
+}
+
+function loadSourceMap(moduleUrl: string): LoadedSourceMap | null {
+  const cached = sourceMapCache.get(moduleUrl);
+  if (cached !== undefined) return cached;
+
+  let map: LoadedSourceMap | null = null;
+  try {
+    const code = fetchTextSync(moduleUrl);
+    const match = code && /\/\/[#@] sourceMappingURL=(\S+)\s*$/.exec(code);
+    if (match) {
+      const mapUrl = new URL(match[1], moduleUrl).href;
+      const inline = /^data:application\/json[^,]*?(;base64)?,(.*)$/.exec(mapUrl);
+      const json = inline
+        ? inline[1]
+          ? new TextDecoder().decode(
+              Uint8Array.from(atob(inline[2]), (char) => char.charCodeAt(0)),
+            )
+          : decodeURIComponent(inline[2])
+        : fetchTextSync(mapUrl);
+
+      if (json) {
+        const parsed = JSON.parse(json) as {
+          sources?: string[];
+          sourceRoot?: string;
+          mappings?: string;
+        };
+        const base = inline ? moduleUrl : mapUrl;
+        map = {
+          sources: (parsed.sources ?? []).map((source) => {
+            const path = (parsed.sourceRoot ?? "") + source;
+            try {
+              return new URL(path, base).href;
+            } catch {
+              return path;
+            }
+          }),
+          lines: decodeSourceMapMappings(parsed.mappings ?? ""),
+        };
+      }
+    }
+  } catch {
+    map = null;
+  }
+
+  sourceMapCache.set(moduleUrl, map);
+  return map;
+}
+
+/**
+ * Map a 1-indexed line and column in a served module to its original source.
+ */
+function mapToOriginalPosition(
+  moduleUrl: string,
+  line: number,
+  column: number,
+): SourceLocation | null {
+  if (!/^https?:/.test(moduleUrl)) return null;
+
+  const map = loadSourceMap(moduleUrl);
+  const segments = map?.lines[line - 1];
+  if (!map || !segments || segments.length === 0) return null;
+
+  let best = segments[0];
+  for (const segment of segments) {
+    if (segment[0] > column - 1) break;
+    best = segment;
+  }
+
+  const source = map.sources[best[1]];
+  if (!source) return null;
+
+  return {
+    fileName: cleanSourcePath(source),
+    lineNumber: best[2] + 1,
+    columnNumber: best[3],
+  };
+}
+
+/**
+ * Resolve where the element's JSX was created, from React 19's `_debugStack`.
+ * When the creation frame is library code (a `<Link>` rendering its `<a>`),
+ * continue with the owner that rendered the library component.
+ */
+function findCreationSource(
+  fiber: ReactFiber,
+  maxDepth = 30,
+): SourceLocation | null {
+  if (typeof XMLHttpRequest === "undefined") return null;
+
+  let current: ReactFiber | null | undefined = fiber;
+  let depth = 0;
+
+  while (current && depth < maxDepth) {
+    const stack = current._debugStack?.stack;
+    const frame = typeof stack === "string" ? parseComponentFrame(stack) : null;
+    if (frame?.column !== undefined) {
+      const source = mapToOriginalPosition(frame.fileName, frame.line, frame.column);
+      if (source) {
+        const owner = current._debugOwner ?? current;
+        return { ...source, componentName: getComponentName(owner) ?? undefined };
+      }
+    }
+
+    current = current._debugOwner;
+    depth++;
+  }
+
+  return null;
+}
+
 /**
  * Gets the source file location for a DOM element in a React application
  *
@@ -716,6 +921,12 @@ export function getSourceLocation(element: HTMLElement): SourceLocationResult {
       isReactApp: true,
       isProduction: false,
     };
+  }
+
+  // React 19: map the element's creation stack through the module's source map
+  const created = findCreationSource(fiber);
+  if (created) {
+    return { found: true, source: created, isReactApp: true, isProduction: false };
   }
 
   // Fallback: probe component via stack trace
