@@ -90,6 +90,15 @@ export function annotationElementFromPoint(
   return best as HTMLElement | null;
 }
 
+/** Shift widens the pick one level so wrappers can be chosen without hunting for exposed padding. */
+export function parentSelectionTarget(element: HTMLElement | null): HTMLElement | null {
+  if (!element) return null;
+  const root = element.getRootNode();
+  const parent = element.parentElement ?? (isShadowRoot(root) ? root.host : null);
+  if (!parent || parent === parent.ownerDocument.documentElement) return element;
+  return parent as HTMLElement;
+}
+
 /** Deep selection follows #119: prefer direct content, then the smallest visual target. */
 export function pierceElementFromPoint(x: number, y: number): HTMLElement | null {
   const top = deepElementFromPoint(x, y);

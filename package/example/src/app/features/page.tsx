@@ -114,6 +114,10 @@ export default function FeaturesPage() {
               <td>Close toolbar or cancel</td>
             </tr>
             <tr>
+              <td><code>Shift</code> (hold)</td>
+              <td>Hover or click the parent of the element under the pointer</td>
+            </tr>
+            <tr>
               <td><code>L</code></td>
               <td>Toggle layout mode</td>
             </tr>

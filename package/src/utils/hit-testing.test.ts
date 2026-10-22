@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { annotationElementFromPoint, deepElementFromPoint, pierceElementFromPoint } from "./hit-testing";
+import { annotationElementFromPoint, deepElementFromPoint, parentSelectionTarget, pierceElementFromPoint } from "./hit-testing";
 
 function box(el: Element, width = 100, height = 40) {
   vi.spyOn(el, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, width, height));
@@ -80,5 +80,21 @@ describe("deep selection", () => {
     // A real annotation on the wrapper keeps its larger target.
     expect(annotationElementFromPoint(10, 10, { width: 500, height: 200 })).toBe(cover);
     expect(annotationElementFromPoint(10, 10, { width: 10, height: 10 })).toBeNull();
+  });
+});
+
+describe("parent selection", () => {
+  it("climbs one level, crosses shadow hosts and stops at the document body", () => {
+    document.body.innerHTML = '<section><p>Alpha</p></section>';
+    const section = document.querySelector("section") as HTMLElement;
+    const paragraph = document.querySelector("p") as HTMLElement;
+    expect(parentSelectionTarget(paragraph)).toBe(section);
+    expect(parentSelectionTarget(section)).toBe(document.body);
+    expect(parentSelectionTarget(document.body)).toBe(document.body);
+    expect(parentSelectionTarget(null)).toBeNull();
+
+    const host = document.body.appendChild(document.createElement("aside"));
+    const button = host.attachShadow({ mode: "open" }).appendChild(document.createElement("button"));
+    expect(parentSelectionTarget(button)).toBe(host);
   });
 });

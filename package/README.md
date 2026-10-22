@@ -51,6 +51,7 @@ browser: create a test annotation and ask your agent to read
 ## Features
 
 - **Click to annotate** – Click any element with automatic selector identification
+- **Parent selection** – Hold Shift to target the parent of the element under the pointer
 - **Text selection** – Select text to annotate specific content
 - **Multi-select** – Hold Cmd/Ctrl to build a selection by clicking elements individually, or drag to select multiple at once
 - **Area selection** – Drag to annotate any region, even empty space
