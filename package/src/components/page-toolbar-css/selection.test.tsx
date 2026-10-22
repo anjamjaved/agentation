@@ -227,3 +227,49 @@ describe('combined selection', () => {
     parent.insertBefore(alpha, next);
   });
 });
+
+describe('parent selection', () => {
+  const highlight = () => root().querySelector('[class*="hoverHighlight"]') as HTMLElement | null;
+  function wrapped() {
+    const onAnnotationAdd = vi.fn();
+    render(<><section aria-label="Wrapper"><p>Alpha</p></section><PageFeedbackToolbarCSS onAnnotationAdd={onAnnotationAdd} /></>);
+    const alpha = screen.getByText('Alpha');
+    const wrapper = alpha.parentElement as HTMLElement;
+    rect(alpha, 40, 40, 80, 30); rect(wrapper, 10, 10, 300, 120);
+    return { alpha, wrapper, onAnnotationAdd };
+  }
+
+  it('highlights the parent while Shift is held and follows key changes without pointer movement', () => {
+    const { alpha } = wrapped(); activate(); point(alpha);
+    fireEvent.mouseMove(alpha, { clientX: 50, clientY: 50 });
+    expect(highlight()!.style.left).toBe('40px');
+    fireEvent.mouseMove(alpha, { clientX: 50, clientY: 50, shiftKey: true });
+    expect(highlight()!.style.left).toBe('10px');
+    expect(root().querySelector('[class*="hoverTooltip"]')!.textContent).toContain('Wrapper');
+    fireEvent.keyUp(document, { key: 'Shift' });
+    expect(highlight()!.style.left).toBe('40px');
+    fireEvent.keyDown(document, { key: 'Shift', shiftKey: true });
+    expect(highlight()!.style.left).toBe('10px');
+  });
+
+  it('Shift-click annotates the parent of the element under the pointer', () => {
+    const { alpha, onAnnotationAdd } = wrapped(); activate(); point(alpha);
+    fireEvent.click(alpha, { clientX: 50, clientY: 50, shiftKey: true });
+    expect(popup()!.textContent).toContain('Wrapper');
+    fireEvent.change(within(root()).getByRole('textbox'), { target: { value: 'Too tight' } });
+    fireEvent.click(within(root()).getByRole('button', { name: 'Add' }));
+    expect(onAnnotationAdd.mock.calls[0][0]).toMatchObject({
+      element: 'section [Wrapper]',
+      boundingBox: { x: 10, width: 300, height: 120 },
+    });
+  });
+
+  it('keeps the legacy Cmd+Shift chord on the clicked element', () => {
+    const { alpha } = wrapped(); activate();
+    select(alpha, { metaKey: true, shiftKey: true } as { metaKey: boolean });
+    expect(outlineCount()).toBe(1);
+    fireEvent.keyUp(document, { key: 'Shift', metaKey: true });
+    expect(popup()!.textContent).toContain('Alpha');
+    expect(popup()!.textContent).not.toContain('Wrapper');
+  });
+});

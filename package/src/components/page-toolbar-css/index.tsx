@@ -3,7 +3,7 @@
 import { useLatestAction } from "../../hooks/use-latest-action";
 import { mergeSessionFeedback } from "../../utils/merge-session-feedback";
 import { createPageEvents, createFrameProjector, viewportRect, parentFrame, captureFrameContext } from "../../utils/frame-dom";
-import { deepElementFromPoint, pierceElementFromPoint, annotationElementFromPoint } from "../../utils/hit-testing";
+import { deepElementFromPoint, pierceElementFromPoint, annotationElementFromPoint, parentSelectionTarget } from "../../utils/hit-testing";
 
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
@@ -243,6 +243,14 @@ const isPrimaryMultiSelectModifierActive = (event: {
   metaKey: boolean;
   ctrlKey: boolean;
 }): boolean => event.metaKey || event.ctrlKey;
+
+// Shift alone targets the parent. With Cmd/Ctrl it stays the legacy
+// multi-select chord, so that gesture keeps picking the clicked element.
+const isParentSelectModifierActive = (event: {
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+}): boolean => event.shiftKey && !isPrimaryMultiSelectModifierActive(event);
 
 export const COLOR_OPTIONS = [
   { id: "indigo",  label: "Indigo",  srgb: "#6155F5", p3: "color(display-p3 0.38 0.33 0.96)" },
@@ -1817,9 +1825,10 @@ function PageFeedbackToolbarForRoute({
   useEffect(() => {
     if (!isActive || pendingAnnotation || editingAnnotation || isDrawMode || isDesignMode) return;
     let lastMouse: { x: number; y: number } | null = null;
-    const evaluateHover = (x: number, y: number, piercing: boolean) => {
+    const evaluateHover = (x: number, y: number, piercing: boolean, toParent: boolean) => {
       const normalElement = deepElementFromPoint(x, y);
-      const elementUnder = piercing ? pierceElementFromPoint(x, y) : normalElement;
+      const picked = piercing ? pierceElementFromPoint(x, y) : normalElement;
+      const elementUnder = toParent ? parentSelectionTarget(picked) : picked;
       if (!elementUnder || closestCrossingShadow(elementUnder,
           "[data-feedback-toolbar], [data-annotation-popup], [data-annotation-marker]")) {
         setHoverInfo(null);
@@ -1841,11 +1850,11 @@ function PageFeedbackToolbarForRoute({
         return;
       }
       lastMouse = { x: e.clientX, y: e.clientY };
-      evaluateHover(e.clientX, e.clientY, isPrimaryMultiSelectModifierActive(e));
+      evaluateHover(e.clientX, e.clientY, isPrimaryMultiSelectModifierActive(e), isParentSelectModifierActive(e));
     };
     const handleKeyChange = (e: KeyboardEvent) => {
-      if ((e.key === "Meta" || e.key === "Control") && lastMouse) {
-        evaluateHover(lastMouse.x, lastMouse.y, isPrimaryMultiSelectModifierActive(e));
+      if ((e.key === "Meta" || e.key === "Control" || e.key === "Shift") && lastMouse) {
+        evaluateHover(lastMouse.x, lastMouse.y, isPrimaryMultiSelectModifierActive(e), isParentSelectModifierActive(e));
       }
     };
     const clearHover = () => { lastMouse = null; setHoverInfo(null); };
@@ -2032,7 +2041,8 @@ function PageFeedbackToolbarForRoute({
 
       e.preventDefault();
 
-      const elementUnder = deepElementFromPoint(e.clientX, e.clientY);
+      const picked = deepElementFromPoint(e.clientX, e.clientY);
+      const elementUnder = isParentSelectModifierActive(e) ? parentSelectionTarget(picked) : picked;
       if (!elementUnder) return;
 
       const { name, path, reactComponents } = identifyElementWithReact(
